@@ -40,9 +40,8 @@ mod filters {
             Type::Float64 => "f64".into(),
             Type::Boolean => "bool".into(),
             Type::String => "String".into(),
-            Type::Enum(name) | Type::Record(name) | Type::Object(name) | Type::Error(name) => {
-                name.clone()
-            }
+            Type::Enum(name) | Type::Record(name) | Type::Error(name) => name.clone(),
+            Type::Object(name) => format!("std::sync::Arc<{}>", name),
             Type::CallbackInterface(name) => format!("Box<dyn {}>", name),
             Type::Optional(t) => format!("Option<{}>", type_rs(t)?),
             Type::Sequence(t) => format!("Vec<{}>", type_rs(t)?),
@@ -63,6 +62,7 @@ mod filters {
             FFIType::Float32 => "f32".into(),
             FFIType::Float64 => "f64".into(),
             FFIType::RustCString => "*mut std::os::raw::c_char".into(),
+            FFIType::RustArcPtr => "*const std::os::raw::c_void".into(),
             FFIType::RustBuffer => "uniffi::RustBuffer".into(),
             FFIType::RustError => "uniffi::deps::ffi_support::ExternError".into(),
             FFIType::ForeignBytes => "uniffi::ForeignBytes".into(),
@@ -70,7 +70,10 @@ mod filters {
         })
     }
 
-    pub fn lower_rs(nm: &dyn fmt::Display, type_: &Type) -> Result<String, askama::Error> {
+    pub fn lower_rs(
+        nm: &dyn fmt::Display,
+        type_: &Type,
+    ) -> Result<String, askama::Error> {
         // By explicitly naming the type here, we help the rust compiler to type-check the user-provided
         // implementations of the functions that we're wrapping (and also to type-check our generated code).
         Ok(match type_ {
@@ -78,11 +81,26 @@ mod filters {
                 "uniffi::ViaFfi::lower is not supported for callback interfaces ({})",
                 type_name
             ),
-            _ => format!("<{} as uniffi::ViaFfi>::lower({})", type_rs(type_)?, nm),
+            // This special case exists because `IntoFfi` is not implemented for
+            // `*const std::os::raw::c_void`. If we fix that, this variant
+            // can be removed and the default one below will work.
+            Type::Object(_) => format!(
+                "uniffi::UniffiVoidPtr(<{} as uniffi::ViaFfi>::lower({}))",
+                type_rs(type_)?,
+                nm
+            ),
+            _ => format!(
+                "<{} as uniffi::ViaFfi>::lower({})",
+                type_rs(type_)?,
+                nm
+            ),
         })
     }
 
-    pub fn lift_rs(nm: &dyn fmt::Display, type_: &Type) -> Result<String, askama::Error> {
+    pub fn lift_rs(
+        nm: &dyn fmt::Display,
+        type_: &Type,
+    ) -> Result<String, askama::Error> {
         // By explicitly naming the type here, we help the rust compiler to type-check the user-provided
         // implementations of the functions that we're wrapping (and also to type-check our generated code).
         // This will panic if the bindings provide an invalid value over the FFI.
