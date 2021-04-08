@@ -8,7 +8,7 @@
 
 {%- macro to_rs_call_with_argname(arg_name, func, obj) -%}
     {{ func.name() }}(
-    &{{- arg_name -}}
+    {% if !func.self_by_arc() %}&{% endif %}{{- arg_name -}}
     {% if func.arguments().len() > 0 %}, {% call _arg_list_rs_call(func) -%}{% endif -%}
 )
 {%- endmacro -%}
