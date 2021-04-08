@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
-use std::sync::RwLock;
+use std::sync::{Arc, Mutex, RwLock};
 
 lazy_static::lazy_static! {
     static ref NUM_ALIVE: RwLock<u64> = {
@@ -88,12 +88,18 @@ type Result<T, E = CoverallError> = std::result::Result<T, E>;
 #[derive(Debug)]
 pub struct Coveralls {
     name: String,
+    // A reference to another Coveralls. Currently will be only a reference
+    // to `self`, so will create a circular reference.
+    other: Mutex<Option<Arc<Self>>>,
 }
 
 impl Coveralls {
     fn new(name: String) -> Self {
         *NUM_ALIVE.write().unwrap() += 1;
-        Self { name }
+        Self {
+            name,
+            other: Mutex::new(None),
+        }
     }
 
     fn fallible_new(name: String, should_fail: bool) -> Result<Self> {
@@ -121,6 +127,26 @@ impl Coveralls {
     }
 
     fn panic(&self, message: String) {
+        panic!("{}", message);
+    }
+
+    fn take_other(self: Arc<Self>) {
+        *self.other.lock().unwrap() = Some(Arc::clone(&self));
+    }
+
+    fn drop_other(&self) {
+        *self.other.lock().unwrap() = None;
+    }
+
+    fn strong_count(self: Arc<Self>) -> u64 {
+        Arc::strong_count(&self) as u64
+    }
+
+    fn take_other_fallible(self: Arc<Self>) -> Result<()> {
+        Err(CoverallError::TooManyHoles)
+    }
+
+    fn take_other_panic(self: Arc<Self>, message: String) -> () {
         panic!("{}", message);
     }
 }
