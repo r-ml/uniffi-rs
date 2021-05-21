@@ -32,6 +32,9 @@ assert(d.maybeFloat32!!.almostEquals(22.0F/7.0F))
 assert(d.float64.almostEquals(0.0))
 assert(d.maybeFloat64!!.almostEquals(1.0))
 
+// TODO: the fact that these aren't garbage-collected is doing to be annoying...
+d.coveralls?.destroy()
+
 // This tests that the UniFFI-generated scaffolding doesn't introduce any unexpected locking.
 // We have one thread busy-wait for a some period of time, while a second thread repeatedly
 // increments the counter and then checks if the object is still busy. The second thread should
@@ -64,3 +67,37 @@ ThreadsafeCounter().use { counter ->
         executor.shutdown()
     }
 }
+
+// Test arcs.
+
+Coveralls("test_arcs").use {coveralls ->
+    assert(getNumAlive() == 1UL);
+    // One ref held by the foreign-language code, one created for this method call.
+    assert(coveralls.strongCount() == 2UL);
+    assert(coveralls.getOther() == null);
+    coveralls.takeOther(coveralls);
+    // Should now be a new strong ref, held by the object's reference to itself.
+    assert(coveralls.strongCount() == 3UL);
+    // But the same number of instances.
+    assert(getNumAlive() == 1UL);
+    // Careful, this currently makes a new Kotlin object which must be separately destroyed.
+    coveralls.getOther()!!.use { other ->
+        // It's the same Rust object.
+        assert(other.getName() == "test_arcs")
+        // TODO: ideally, it would return the same Kotlin-level object.
+        // (but how does that interact auth auto-closing..?)
+        // assert(coveralls.getOther()!! === coveralls);
+    }
+    //
+    //with self.assertRaises(CoverallError.TooManyHoles):
+    //    coveralls.take_other_fallible()
+    //
+    //with self.assertRaisesRegex(InternalError, "expected panic: with an arc!"):
+    //    coveralls.take_other_panic("expected panic: with an arc!")
+    //
+    coveralls.takeOther(null);
+    println(coveralls.strongCount());
+    assert(coveralls.strongCount() == 2UL);
+}
+// The `use` block destroys the Kotlin instance.
+assert(getNumAlive() == 0UL);

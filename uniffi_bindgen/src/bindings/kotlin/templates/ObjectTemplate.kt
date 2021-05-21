@@ -40,6 +40,14 @@ class {{ obj.name()|class_name_kt }}(
         }
     }
 
+    internal fun lower(): Long {
+        callWithHandle { ptr -> return ptr }
+    }
+
+    internal fun write(buf: RustBufferBuilder) {
+        buf.putLong(this.lower())
+    }
+
     {% for meth in obj.methods() -%}
     {%- match meth.return_type() -%}
 
@@ -59,12 +67,19 @@ class {{ obj.name()|class_name_kt }}(
     {% endmatch %}
     {% endfor %}
 
-    {% if obj.constructors().len() > 1 -%}
     companion object {
+        internal fun lift(ptr: Long): {{ obj.name()|class_name_kt }} {
+            return {{ obj.name()|class_name_kt }}(ptr)
+            // TODO: identity map to smoosh clones together
+        }
+
+        internal fun read(buf: ByteBuffer): {{ obj.name()|class_name_kt }} {
+            return {{ obj.name()|class_name_kt }}(buf.getLong())
+        }
+
         {% for cons in obj.alternate_constructors() -%}
         fun {{ cons.name()|fn_name_kt }}({% call kt::arg_list_decl(cons) %}): {{ obj.name()|class_name_kt }} =
             {{ obj.name()|class_name_kt }}({% call kt::to_ffi_call(cons) %})
         {% endfor %}
     }
-    {%- endif %}
 }

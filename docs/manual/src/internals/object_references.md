@@ -29,26 +29,22 @@ of the component - as much as possible, UniFFI tries to stay out of your way, si
 that the object implementation is `Send+Sync` and letting the Rust compiler ensure that
 this is so.
 
-Typically this will mean your implementation uses some data structures
-explicitly designed for this purpose, such as a `Mutex` or `RwLock` - but this
-detail is completely up to you - as much as possible, uniffi tries to stay out
-of your way, so ultimately it is the Rust compiler itself which is the ultimate
-arbiter.
-
 ## Lifetimes
 
-In order to allow for instances to be used as flexibly as possible, uniffi
-works with `Arc`s holding a pointer to your instances and leverages their
-reference-count based lifetimes, allowing uniffi to largely stay out
-of handling lifetimes entirely for these objects.
+In order to allow for instances to be used as flexibly as possible from foreign-language code,
+UniFFI wraps all object instances in an `Arc` leverages their reference-count based lifetimes,
+allowing UniFFI to largely stay out of handling lifetimes entirely for these objects.
 
-However, this does come at a cost - when you want to return instances from
-your dictionaries or methods, you must return an `Arc<>` directly. When
-accepting instances as arguments, you can choose to accept it as an `Arc<>` or
-as the underlying struct - there are different use-cases for each scenario.
+When constructing a new object, UniFFI is able to add the `Arc` automatically, because it
+knows that the return type of the Rust constructor must be a new uniquely-owned struct of
+the corresponding type.
 
-The exception to the above is constructors - these are expected to just provide
-the instance and uniffi will wrap it in the `Arc<>`.
+When you want to return object instances from functions or methods, or store object instances
+as fields in records, the underlying Rust code will need to work with `Arc<T>` directly, so ensure
+that the code behaves in the way that UniFFI expects.
+
+When accepting instances as arguments, the underlying Rust code can choose to accept it as an `Arc<T>`
+or as the underlying struct `T`, as there are different use-cases for each scenario.
 
 For example, given a interface definition like this:
 
@@ -61,8 +57,8 @@ interface TodoList {
 ```
 
 On the Rust side of the generated bindings, the instance constructor will create an instance of the
-corresponding `TodoList` Rust struct, wrap it in an `Arc<>` and return a raw
-pointer to the foreign language code:
+corresponding `TodoList` Rust struct, wrap it in an `Arc<>` and return the Arc's raw pointer to the
+foreign language code:
 
 ```rust
 pub extern "C" fn todolist_12ba_TodoList_new(
@@ -76,7 +72,7 @@ pub extern "C" fn todolist_12ba_TodoList_new(
 }
 ```
 
-and the uniffi runtime defines:
+The UniFFI runtime implements lowering for object instances using `Arc::into_raw`:
 
 ```rust
 unsafe impl<T: Sync + Send> ViaFfi for std::sync::Arc<T> {
@@ -88,10 +84,13 @@ unsafe impl<T: Sync + Send> ViaFfi for std::sync::Arc<T> {
 ```
 
 which does the "arc to pointer" dance for us. Note that this has "leaked" the
-`Arc<>` reference - if we never see that pointer again, our instance will leak.
+`Arc<>` reference out of Rusts ownership system and given it to the foreign-language code.
+The foreign-language code must pass that pointer back into Rust in order to free it,
+or our instance will leak.
 
 When invoking a method on the instance, the foreign-language code passes the
-raw pointer back to the Rust code, which turns it back into a cloned `Arc<>` which
+raw pointer back to the Rust code, conceptially passing a "borrow" of the `Arc<>` to
+the Rust scaffolding. The Rust side turns it back into a cloned `Arc<>` which
 lives for the duration of the method call:
 
 ```rust
@@ -109,7 +108,7 @@ pub extern "C" fn todolist_12ba_TodoList_add_item(
 }
 ```
 
-where the uniffi runtime defines:
+The UniFFI runtime implements lifting for object instances using `Arc::from_raw`:
 
 ```rust
 unsafe impl<T: Sync + Send> ViaFfi for std::sync::Arc<T> {
@@ -124,7 +123,9 @@ unsafe impl<T: Sync + Send> ViaFfi for std::sync::Arc<T> {
 ```
 
 Notice that we take care to ensure the reference added by the constructor
-remains alive. Finally, when the foreign-language code frees the instance, it
+remains alive.
+
+Finally, when the foreign-language code frees the instance, it
 passes the raw pointer a special destructor function so that the Rust code can
 drop that initial final reference (and if that happens to be the final reference,
 the rust object will be dropped.)
@@ -139,3 +140,6 @@ pub extern "C" fn ffi_todolist_12ba_TodoList_object_free(ptr: *const std::os::ra
     }
 }
 ```
+
+Passing instances as arguments and returning them as values works similarly, except that
+UniFFI does not automatically wrap/unwrap the containing `Arc`.
