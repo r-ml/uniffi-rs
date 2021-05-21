@@ -29,7 +29,7 @@ pub(super) enum Attribute {
     Enum,
     Error,
     Name(String),
-    Threadsafe,
+    Threadsafe, // N.B. the `[Threadsafe]` attribute is deprecated and will be removed
     Throws(String),
 }
 
